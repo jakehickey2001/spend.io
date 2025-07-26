@@ -1,73 +1,83 @@
 import streamlit as st
-import os
 import pandas as pd
 import openai
+import time
+from ratelimit import limits, sleep_and_retry
 
-# === YOUR API KEY ===
-openai.api_key = os.getenv("OPENAI_API_KEY")
+# Load OpenAI key
+openai.api_key = st.secrets["OPENAI_API_KEY"]
 
-# === CLEAN DESCRIPTION ===
-def clean_description(desc):
-    desc = str(desc).lower()
-    for junk in ["vdp-", "vdc-", "vdcs-", "vdd-", "*", "-", ".", ","]:
-        desc = desc.replace(junk, "")
-    return desc.strip()
+# OpenAI rate limit for gpt-4.1-mini
+MAX_REQUESTS_PER_MINUTE = 450
 
-# === GPT CATEGORY FUNCTION ===
-def gpt_category(desc, index):
-    prompt = (
-        f"This is a transaction from a bank: '{desc}'. "
-        "What type of business is this likely to be? Pick ONE category from this list: "
-        "Drinking, Groceries, Transport, Shopping, Health, Cafe, Food & Dining, Lodging, Transfers, Entertainment, Other. "
+# GPT model
+MODEL = "gpt-4-1106-preview"  # GPT-4.1-mini
+
+# Define allowed categories
+CATEGORIES = ["Drinking", "Groceries", "Transport", "Shopping", "Health", 
+              "Cafe", "Food & Dining", "Lodging", "Transfers", "Entertainment", "Other"]
+
+# Prompt template
+def make_prompt(description):
+    return (
+        f"This is a transaction from a bank: '{description}'. "
+        f"What type of business is this likely to be? "
+        f"Pick ONE category from this list: {', '.join(CATEGORIES)}. "
         "Only reply with the category name."
     )
+
+# Rate-limited GPT call
+@sleep_and_retry
+@limits(calls=MAX_REQUESTS_PER_MINUTE, period=60)
+def classify_transaction(description):
     try:
+        prompt = make_prompt(description)
         response = openai.chat.completions.create(
-            model="gpt-4o",
+            model=MODEL,
             messages=[{"role": "user", "content": prompt}],
             temperature=0
         )
         category = response.choices[0].message.content.strip()
+        return category, prompt, response.usage.total_tokens
     except Exception as e:
-        category = "Other"
-        st.error(f"Error processing transaction {index + 1}: {e}")
+        return f"Error: {e}", description, 0
 
-    st.text_area(f"Prompt {index + 1}", prompt, height=100)
-    st.text_area(f"Response {index + 1}", category, height=80)
+# Streamlit UI
+st.title("🧠 GPT-Powered Transaction Categorizer")
+st.markdown("Upload a CSV with a column named `Description` to auto-categorize using GPT-4.1-mini.")
 
-    return category
-
-# === STREAMLIT APP ===
-st.title("💸 Smart Transaction Categorizer (OpenAI Only)")
-st.write("Upload a bank CSV and let the app categorize each transaction using OpenAI GPT.")
-
-uploaded_file = st.file_uploader("📂 Upload your CSV file", type="csv")
+uploaded_file = st.file_uploader("Upload your CSV", type=["csv"])
 
 if uploaded_file:
     df = pd.read_csv(uploaded_file)
-    st.write("✅ Here's a preview of your data:")
-    st.dataframe(df.head())
+    
+    if "Description" not in df.columns:
+        st.error("CSV must contain a 'Description' column.")
+    else:
+        results = []
+        logs = []
+        total_tokens = 0
 
-    desc_col = st.selectbox("👉 Select the column with transaction descriptions:", df.columns)
+        with st.spinner("Processing transactions..."):
+            for i, row in df.iterrows():
+                desc = str(row["Description"])
+                category, prompt, tokens_used = classify_transaction(desc)
+                total_tokens += tokens_used
+                results.append(category)
+                logs.append({"Prompt": prompt, "Response": category})
 
-    if st.button("🚀 Categorize Transactions"):
-        st.write("Thinking hard... 🧠 This may take a few minutes.")
+        df["Category"] = results
+        st.success("Done!")
+        st.dataframe(df)
 
-        df["Cleaned_Description"] = df[desc_col].apply(clean_description)
-        categories = []
-        total = len(df)
-        progress = st.progress(0)
-        status_text = st.empty()
+        st.markdown("### 🪵 Debug Log")
+        for i, log in enumerate(logs):
+            st.markdown(f"**Transaction {i+1}**")
+            st.code(f"Prompt: {log['Prompt']}")
+            st.code(f"Response: {log['Response']}")
 
-        for i, desc in enumerate(df["Cleaned_Description"]):
-            category = gpt_category(desc, i)
-            categories.append(category)
-            progress.progress((i + 1) / total)
-            status_text.text(f"{i + 1} of {total} transactions done")
+        st.markdown(f"**Total tokens used:** {total_tokens}")
 
-        df["Category"] = categories
-        st.success("🎉 Done! Here's the result:")
-        st.dataframe(df[[desc_col, "Category"]])
-
+        # Optional: download results
         csv = df.to_csv(index=False).encode("utf-8")
-        st.download_button("📥 Download Categorized CSV", csv, "categorized_transactions.csv", "text/csv")
+        st.download_button("Download Categorized CSV", csv, "categorized_transactions.csv", "text/csv")
