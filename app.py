@@ -3,8 +3,8 @@ import os
 import pandas as pd
 import openai
 
-# === YOUR API KEY from Streamlit Secrets ===
-openai.api_key = st.secrets["OPENAI_API_KEY"]
+# === YOUR API KEY ===
+openai.api_key = os.getenv("OPENAI_API_KEY")
 
 # === CLEAN DESCRIPTION ===
 def clean_description(desc):
@@ -13,7 +13,7 @@ def clean_description(desc):
         desc = desc.replace(junk, "")
     return desc.strip()
 
-# === GPT CATEGORY FUNCTION with debug output ===
+# === GPT CATEGORY FUNCTION ===
 def gpt_category(desc, index):
     prompt = (
         f"This is a transaction from a bank: '{desc}'. "
@@ -22,25 +22,24 @@ def gpt_category(desc, index):
         "Only reply with the category name."
     )
     try:
-        response = openai.ChatCompletion.create(
+        response = openai.chat.completions.create(
             model="gpt-4o",
             messages=[{"role": "user", "content": prompt}],
             temperature=0
         )
-        category = response["choices"][0]["message"]["content"].strip()
+        category = response.choices[0].message.content.strip()
     except Exception as e:
         category = "Other"
         st.error(f"Error processing transaction {index + 1}: {e}")
 
-    # Debug output: show prompt and response in the app
     st.text_area(f"Prompt {index + 1}", prompt, height=100)
-    st.text_area(f"Response {index + 1}", category, height=50)
+    st.text_area(f"Response {index + 1}", category, height=80)
 
     return category
 
 # === STREAMLIT APP ===
-st.title("💸 Smart Transaction Categorizer with OpenAI Debug Output")
-st.write("Upload a bank CSV and let ChatGPT categorize each transaction.")
+st.title("💸 Smart Transaction Categorizer (OpenAI Only)")
+st.write("Upload a bank CSV and let the app categorize each transaction using OpenAI GPT.")
 
 uploaded_file = st.file_uploader("📂 Upload your CSV file", type="csv")
 
