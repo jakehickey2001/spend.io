@@ -2,35 +2,9 @@ import streamlit as st
 import os
 import pandas as pd
 import openai
-import googlemaps
 
-# === YOUR API KEYS ===
+# === OPENAI SETUP ===
 openai.api_key = os.getenv("OPENAI_API_KEY")
-gmaps = googlemaps.Client(key="AIzaSyBhJaWSK_aXvAEk1xjLdEmnXgRD2F_uYvY")
-
-# === HARD-CODED MATCHES ===
-keyword_rules = {
-    "aldi": "Groceries",
-    "centra": "Groceries",
-    "lidl": "Groceries",
-    "tesco": "Groceries",
-    "ryanair": "Transport",
-    "revolut": "Transfers",
-    "uber": "Transport",
-    "omniplex": "Entertainment",
-    "cinema": "Entertainment",
-    "audible": "Entertainment",
-    "kebab": "Food & Dining",
-    "cafe": "Cafe",
-    "pub": "Drinking",
-    "bar": "Drinking",
-    "pharmacy": "Health",
-    "boots": "Health",
-    "hotel": "Lodging",
-    "airbnb": "Lodging",
-    "amazon": "Shopping",
-    "zara": "Shopping",
-}
 
 # === CLEAN DESCRIPTION ===
 def clean_description(desc):
@@ -39,40 +13,8 @@ def clean_description(desc):
         desc = desc.replace(junk, "")
     return desc.strip()
 
-# === MATCHING FUNCTIONS ===
-def keyword_category(desc):
-    for word, category in keyword_rules.items():
-        if word in desc:
-            return category
-    return None
-
-def google_places_category(desc):
-    try:
-        result = gmaps.places(desc + " ireland")
-        if result["status"] == "OK" and result["results"]:
-            types = result["results"][0]["types"]
-            if any(x in types for x in ["bar", "night_club", "liquor_store"]):
-                return "Drinking"
-            if any(x in types for x in ["restaurant", "meal_takeaway", "food"]):
-                return "Food & Dining"
-            if any(x in types for x in ["cafe", "bakery"]):
-                return "Cafe"
-            if any(x in types for x in ["pharmacy", "health"]):
-                return "Health"
-            if any(x in types for x in ["supermarket", "convenience_store", "grocery_or_supermarket"]):
-                return "Groceries"
-            if any(x in types for x in ["movie_theater", "amusement_park"]):
-                return "Entertainment"
-            if any(x in types for x in ["clothing_store", "shopping_mall"]):
-                return "Shopping"
-            if any(x in types for x in ["lodging", "hotel"]):
-                return "Lodging"
-            if any(x in types for x in ["taxi_stand", "bus_station", "airport", "subway_station", "train_station"]):
-                return "Transport"
-        return None
-    except Exception:
-        return None
-
+# === GPT CATEGORY FUNCTION WITH CACHING ===
+@st.cache_data(show_spinner=False)
 def gpt_category(desc):
     try:
         prompt = (
@@ -86,13 +28,16 @@ def gpt_category(desc):
             messages=[{"role": "user", "content": prompt}],
             temperature=0
         )
+        # Optional: log token usage
+        print("Tokens used:", response["usage"]["total_tokens"])
         return response["choices"][0]["message"]["content"].strip()
-    except Exception:
+    except Exception as e:
+        print("GPT Error:", e)
         return "Other"
 
 # === STREAMLIT APP ===
-st.title("💸 Smart Transaction Categorizer (with Progress Bar)")
-st.write("Upload a bank CSV and let the app figure out what each transaction is.")
+st.title("💸 Smart Transaction Categorizer (GPT-only)")
+st.write("Upload a bank CSV and let GPT categorize each transaction.")
 
 uploaded_file = st.file_uploader("📂 Upload your CSV file", type="csv")
 
@@ -113,12 +58,7 @@ if uploaded_file:
         status_text = st.empty()
 
         for i, desc in enumerate(df["Cleaned_Description"]):
-            category = keyword_category(desc)
-            if not category:
-                category = google_places_category(desc)
-            if not category:
-                category = gpt_category(desc)
-
+            category = gpt_category(desc)
             categories.append(category)
             progress.progress((i + 1) / total)
             status_text.text(f"{i + 1} of {total} transactions done")
