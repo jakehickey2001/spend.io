@@ -1,19 +1,18 @@
 import streamlit as st
-import os
 import pandas as pd
-import openai
+from openai import OpenAI
 
-# === SET API KEY ===
-openai.api_key = os.getenv("OPENAI_API_KEY")  # OR hardcode for testing: openai.api_key = "sk-..."
+# Initialize OpenAI client (assumes OPENAI_API_KEY is set in environment or Streamlit secrets)
+client = OpenAI()
 
-# === CLEAN DESCRIPTION FUNCTION ===
+# Clean description helper
 def clean_description(desc):
     desc = str(desc).lower()
     for junk in ["vdp-", "vdc-", "vdcs-", "vdd-", "*", "-", ".", ","]:
         desc = desc.replace(junk, "")
     return desc.strip()
 
-# === GPT CATEGORISATION FUNCTION ===
+# GPT-based category function using new OpenAI SDK style
 def gpt_category(desc):
     try:
         prompt = (
@@ -22,19 +21,19 @@ def gpt_category(desc):
             "Drinking, Groceries, Transport, Shopping, Health, Cafe, Food & Dining, Lodging, Transfers, Entertainment, Other. "
             "Only reply with the category name."
         )
-        response = openai.ChatCompletion.create(
+        response = client.chat.completions.create(
             model="gpt-4o",
             messages=[{"role": "user", "content": prompt}],
             temperature=0
         )
-        return response["choices"][0]["message"]["content"].strip()
-    except Exception as e:
-        print(f"Error for '{desc}': {e}")
+        return response.choices[0].message.content.strip()
+    except Exception:
         return "Other"
 
-# === STREAMLIT APP ===
-st.title("💸 AI Transaction Categoriser")
-st.write("Upload a bank CSV and let GPT-4 categorise your transactions.")
+# Streamlit app
+st.title("💸 Smart Transaction Categorizer (OpenAI API only)")
+
+st.write("Upload a bank CSV and let ChatGPT categorize each transaction.")
 
 uploaded_file = st.file_uploader("📂 Upload your CSV file", type="csv")
 
@@ -46,11 +45,11 @@ if uploaded_file:
     desc_col = st.selectbox("👉 Select the column with transaction descriptions:", df.columns)
 
     if st.button("🚀 Categorize Transactions"):
-        st.write("Thinking... 🧠 This may take a minute depending on the size of your file.")
+        st.write("Thinking hard... 🧠 This might take a few minutes depending on file size.")
 
         df["Cleaned_Description"] = df[desc_col].apply(clean_description)
-        total = len(df)
         categories = []
+        total = len(df)
         progress = st.progress(0)
         status_text = st.empty()
 
@@ -58,7 +57,7 @@ if uploaded_file:
             category = gpt_category(desc)
             categories.append(category)
             progress.progress((i + 1) / total)
-            status_text.text(f"{i + 1} of {total} transactions done")
+            status_text.text(f"{i + 1} of {total} transactions categorized")
 
         df["Category"] = categories
         st.success("🎉 Done! Here's the result:")
